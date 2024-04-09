@@ -32,8 +32,6 @@ archives:
       {{- else }}{{ .Arch }}{{ end }}
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     # use zip for windows archives
-    files:
-      - qclean
     format_overrides:
       - goos: windows
         format: zip
