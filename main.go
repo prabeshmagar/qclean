@@ -35,7 +35,6 @@ func init() {
 }
 
 func main() {
-
 	var (
 		queueName string
 		port      string
@@ -55,44 +54,63 @@ func main() {
 	flag.StringVar(&url, "url", "localhost", "URL")
 	flag.Parse()
 
-	fmt.Println("Queue Name:", queueName)
-	// Connect to RabbitMQ server
-	rabbitmqUrl := fmt.Sprintf("amqp://%s:%s@%s:%s/", user, password, url, port)
-	conn, err := amqp.Dial(rabbitmqUrl)
+	if queueName == "" {
+		fmt.Println("No queue name provided. Please provide a queue name using the -q or --queue flag.")
+		os.Exit(1)
+	}
+
+	conn, err := connectToRabbitMQ(user, password, url, port)
 	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+		log.Fatal(err)
 	}
 	defer conn.Close()
 
-	// Fetch all existing queues using RabbitMQ Management API
-	queues, err := getQueuesFromManagementAPI(user, password, url)
+	ch, err := openChannel(conn)
 	if err != nil {
-		log.Fatalf("Failed to fetch queues from RabbitMQ Management API: %v", err)
-	}
-
-	// Open a channel
-	ch, err := conn.Channel()
-	if err != nil {
-		log.Fatalf("Failed to open a channel: %v", err)
+		log.Fatal(err)
 	}
 	defer ch.Close()
 
-	for _, q := range queues {
-		if queueName == q.Name {
-			if _, err = ch.QueueDelete(q.Name, false, false, false); err != nil {
-				log.Fatalf("Failed to delete the queue %s: %v", q.Name, err)
-			}
-			log.Printf("Queue %s deleted successfully", q.Name)
-
-			return
-		}
-		if q.Name != queueName {
-			if _, err = ch.QueueDelete(q.Name, false, false, false); err != nil {
-				log.Fatalf("Failed to delete the queue %s: %v", q.Name, err)
-			}
-		}
-		log.Printf("Queue %s deleted successfully", q.Name)
+	queues, err := getQueuesFromManagementAPI(user, password, url)
+	fmt.Printf("--> Found %d queues\n", len(queues))
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	for _, q := range queues {
+		if queueName == q.Name || queueName == "all" {
+			if err := deleteQueue(ch, q.Name); err != nil {
+				log.Fatal(err)
+			}
+		}
+	}
+}
+
+func connectToRabbitMQ(user, password, url, port string) (*amqp.Connection, error) {
+	rabbitmqUrl := fmt.Sprintf("amqp://%s:%s@%s:%s/", user, password, url, port)
+	fmt.Printf("--> Connecting to RabbitMQ at %s\n", rabbitmqUrl)
+	conn, err := amqp.Dial(rabbitmqUrl)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to RabbitMQ: %v", err)
+	}
+	return conn, nil
+}
+
+func openChannel(conn *amqp.Connection) (*amqp.Channel, error) {
+	ch, err := conn.Channel()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open a channel: %v", err)
+	}
+	return ch, nil
+}
+
+func deleteQueue(ch *amqp.Channel, queueName string) error {
+	_, err := ch.QueueDelete(queueName, false, false, false)
+	if err != nil {
+		return fmt.Errorf("failed to delete the queue %s: %v", queueName, err)
+	}
+	log.Printf("Queue %s deleted successfully", queueName)
+	return nil
 }
 
 func getQueuesFromManagementAPI(username string, password string, url string) ([]QueueInfo, error) {
